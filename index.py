@@ -1,37 +1,42 @@
+import torch
 from flask import Flask, request, jsonify
-from transformers import MarianMTModel, MarianTokenizer
-import threading
+from transformers import MBartForConditionalGeneration, MBart50Tokenizer
 
+# Khởi tạo ứng dụng Flask
 app = Flask(__name__)
 
-# Tải mô hình và tokenizer MarianMT
-model_name = 'Helsinki-NLP/opus-mt-ja-en'  # Mô hình dịch từ tiếng Nhật sang tiếng Anh
-tokenizer = MarianTokenizer.from_pretrained(model_name)
-model = MarianMTModel.from_pretrained(model_name)
+# Tải mô hình và tokenizer
+model_name = 'facebook/mbart-large-50-many-to-many-mmt'
+tokenizer = MBart50Tokenizer.from_pretrained(model_name)
+model = MBartForConditionalGeneration.from_pretrained(model_name)
 
-# Hàm để xử lý dịch thuật trong một luồng riêng
-def translate_text(text, result_dict, request_id):
-    inputs = tokenizer(text, return_tensors='pt', padding=True, truncation=True)
-    translated = model.generate(**inputs, max_length=50)
+# Hàm để dịch văn bản từ tiếng Nhật sang tiếng Anh
+def translate_text(text, max_length=None):
+    source_lang = "ja_XX"  # Mã ngôn ngữ tiếng Nhật
+    input_ids = tokenizer.encode(source_lang + ' ' + text, return_tensors='pt', padding=True, truncation=True)
+
+    # Tạo bản dịch
+    if max_length is None:
+        translated = model.generate(input_ids)
+    else:
+        translated = model.generate(input_ids, max_length=max_length)
+    
     translation = tokenizer.decode(translated[0], skip_special_tokens=True)
-    result_dict[request_id] = translation
+    return translation
 
+# API endpoint cho dịch thuật
 @app.route('/translate', methods=['POST'])
 def translate():
-    data = request.get_json()
-    text = data.get('text', '')
-    request_id = str(id(data))  # Tạo ID yêu cầu duy nhất
+    data = request.json
+    text = data.get('text')
+    max_length = data.get('max_length', None)  # Độ dài tối đa tùy chọn
 
-    # Tạo dictionary để lưu kết quả
-    result_dict = {}
+    if text is None:
+        return jsonify({'error': 'Text is required'}), 400
+    
+    translation = translate_text(text, max_length)
+    return jsonify({'translation': translation})
 
-    # Tạo và bắt đầu luồng
-    translate_thread = threading.Thread(target=translate_text, args=(text, result_dict, request_id))
-    translate_thread.start()
-    translate_thread.join()  # Chờ luồng hoàn tất
-
-    # Trả về kết quả
-    return jsonify({'translation': result_dict[request_id]})
-
+# Chạy ứng dụng Flask
 if __name__ == '__main__':
-    app.run(debug=True, threaded=True)
+    app.run(debug=True)
